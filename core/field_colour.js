@@ -27,6 +27,8 @@
 goog.provide('Blockly.FieldColour');
 
 goog.require('Blockly.Field');
+goog.require('Blockly.utils');
+
 goog.require('goog.dom');
 goog.require('goog.events');
 goog.require('goog.style');
@@ -46,9 +48,20 @@ goog.require('goog.ui.ColorPicker');
  */
 Blockly.FieldColour = function(colour, opt_validator) {
   Blockly.FieldColour.superClass_.constructor.call(this, colour, opt_validator);
-  this.setText(Blockly.Field.NBSP + Blockly.Field.NBSP + Blockly.Field.NBSP);
+  this.addArgType('colour');
 };
 goog.inherits(Blockly.FieldColour, Blockly.Field);
+
+/**
+ * Construct a FieldColour from a JSON arg object.
+ * @param {!Object} options A JSON object with options (colour).
+ * @returns {!Blockly.FieldColour} The new field instance.
+ * @package
+ * @nocollapse
+ */
+Blockly.FieldColour.fromJson = function(options) {
+  return new Blockly.FieldColour(options['colour']);
+};
 
 /**
  * By default use the global constants for colours.
@@ -69,13 +82,11 @@ Blockly.FieldColour.prototype.columns_ = 0;
  * @param {!Blockly.Block} block The block containing this field.
  */
 Blockly.FieldColour.prototype.init = function(block) {
-  Blockly.FieldColour.superClass_.init.call(this, block);
-  // TODO(#163): borderRect_ has been removed from the field.
-  // When fixing field_colour, we should re-color the shadow block instead,
-  // or re-implement a rectangle in the field.
-  if (this.borderRect_) {
-    this.borderRect_.style['fillOpacity'] = 1;
+  if (this.fieldGroup_) {
+    // Colour field has already been initialized once.
+    return;
   }
+  Blockly.FieldColour.superClass_.init.call(this, block);
   this.setValue(this.getValue());
 };
 
@@ -107,12 +118,14 @@ Blockly.FieldColour.prototype.getValue = function() {
 Blockly.FieldColour.prototype.setValue = function(colour) {
   if (this.sourceBlock_ && Blockly.Events.isEnabled() &&
       this.colour_ != colour) {
-    Blockly.Events.fire(new Blockly.Events.Change(
+    Blockly.Events.fire(new Blockly.Events.BlockChange(
         this.sourceBlock_, 'field', this.name, this.colour_, colour));
   }
   this.colour_ = colour;
-  if (this.borderRect_) {
-    this.borderRect_.style.fill = colour;
+  if (this.sourceBlock_) {
+    // Set the primary, secondary and tertiary colour to this value.
+    // The renderer expects to be able to use the secondary color as the fill for a shadow.
+    this.sourceBlock_.setColour(colour, colour, colour);
   }
 };
 
@@ -128,6 +141,14 @@ Blockly.FieldColour.prototype.getText = function() {
     colour = '#' + m[1] + m[2] + m[3];
   }
   return colour;
+};
+
+/**
+ * Returns the fixed height and width.
+ * @return {!goog.math.Size} Height and width.
+ */
+Blockly.FieldColour.prototype.getSize = function() {
+  return new goog.math.Size(Blockly.BlockSvg.FIELD_WIDTH, Blockly.BlockSvg.FIELD_HEIGHT);
 };
 
 /**
@@ -172,45 +193,18 @@ Blockly.FieldColour.prototype.setColumns = function(columns) {
 Blockly.FieldColour.prototype.showEditor_ = function() {
   Blockly.WidgetDiv.show(this, this.sourceBlock_.RTL,
       Blockly.FieldColour.widgetDispose_);
-  // Create the palette using Closure.
-  var picker = new goog.ui.ColorPicker();
-  picker.setSize(this.columns_ || Blockly.FieldColour.COLUMNS);
-  picker.setColors(this.colours_ || Blockly.FieldColour.COLOURS);
 
-  // Position the palette to line up with the field.
-  // Record windowSize and scrollOffset before adding the palette.
-  var windowSize = goog.dom.getViewportSize();
-  var scrollOffset = goog.style.getViewportPageOffset(document);
-  var xy = this.getAbsoluteXY_();
-  var borderBBox = this.getScaledBBox_();
-  var div = Blockly.WidgetDiv.DIV;
-  picker.render(div);
-  picker.setSelectedColor(this.getValue());
-  // Record paletteSize after adding the palette.
+  // Record viewport dimensions before adding the widget.
+  var viewportBBox = Blockly.utils.getViewportBBox();
+  var anchorBBox = this.getScaledBBox_();
+
+  // Create and add the colour picker, then record the size.
+  var picker = this.createWidget_();
   var paletteSize = goog.style.getSize(picker.getElement());
 
-  // Flip the palette vertically if off the bottom.
-  if (xy.y + paletteSize.height + borderBBox.height >=
-      windowSize.height + scrollOffset.y) {
-    xy.y -= paletteSize.height - 1;
-  } else {
-    xy.y += borderBBox.height - 1;
-  }
-  if (this.sourceBlock_.RTL) {
-    xy.x += borderBBox.width;
-    xy.x -= paletteSize.width;
-    // Don't go offscreen left.
-    if (xy.x < scrollOffset.x) {
-      xy.x = scrollOffset.x;
-    }
-  } else {
-    // Don't go offscreen right.
-    if (xy.x > windowSize.width + scrollOffset.x - paletteSize.width) {
-      xy.x = windowSize.width + scrollOffset.x - paletteSize.width;
-    }
-  }
-  Blockly.WidgetDiv.position(xy.x, xy.y, windowSize, scrollOffset,
-                             this.sourceBlock_.RTL);
+  // Position the picker to line up with the field.
+  Blockly.WidgetDiv.positionWithAnchor(viewportBBox, anchorBBox, paletteSize,
+      this.sourceBlock_.RTL);
 
   // Configure event handler.
   var thisField = this;
@@ -219,17 +213,30 @@ Blockly.FieldColour.prototype.showEditor_ = function() {
       function(event) {
         var colour = event.target.getSelectedColor() || '#000000';
         Blockly.WidgetDiv.hide();
-        if (thisField.sourceBlock_ && thisField.validator_) {
+        if (thisField.sourceBlock_) {
           // Call any validation function, and allow it to override.
-          var override = thisField.validator_(colour);
-          if (override !== undefined) {
-            colour = override;
-          }
+          colour = thisField.callValidator(colour);
         }
         if (colour !== null) {
           thisField.setValue(colour);
         }
       });
+};
+
+/**
+ * Create a color picker widget and render it inside the widget div.
+ * @return {!goog.ui.ColorPicker} The newly created color picker.
+ * @private
+ */
+Blockly.FieldColour.prototype.createWidget_ = function() {
+  // Create the palette using Closure.
+  var picker = new goog.ui.ColorPicker();
+  picker.setSize(this.columns_ || Blockly.FieldColour.COLUMNS);
+  picker.setColors(this.colours_ || Blockly.FieldColour.COLOURS);
+  var div = Blockly.WidgetDiv.DIV;
+  picker.render(div);
+  picker.setSelectedColor(this.getValue());
+  return picker;
 };
 
 /**
@@ -240,4 +247,7 @@ Blockly.FieldColour.widgetDispose_ = function() {
   if (Blockly.FieldColour.changeEventKey_) {
     goog.events.unlistenByKey(Blockly.FieldColour.changeEventKey_);
   }
+  Blockly.Events.setGroup(false);
 };
+
+Blockly.Field.register('field_colour', Blockly.FieldColour);

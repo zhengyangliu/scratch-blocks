@@ -33,13 +33,19 @@ var dummyWorkspace;
 
 function connectionTest_setUp() {
   dummyWorkspace = {};
-  input = new Blockly.Connection({workspace: dummyWorkspace},
+  function createDummyBlock() {
+    return {
+      workspace: dummyWorkspace,
+      isShadow: function() {return false;}
+    };
+  }
+  input = new Blockly.Connection(createDummyBlock(),
       Blockly.INPUT_VALUE);
-  output = new Blockly.Connection({workspace: dummyWorkspace},
+  output = new Blockly.Connection(createDummyBlock(),
       Blockly.OUTPUT_VALUE);
-  previous = new Blockly.Connection({workspace: dummyWorkspace},
+  previous = new Blockly.Connection(createDummyBlock(),
       Blockly.PREVIOUS_STATEMENT);
-  next = new Blockly.Connection({workspace: dummyWorkspace},
+  next = new Blockly.Connection(createDummyBlock(),
       Blockly.NEXT_STATEMENT);
 }
 
@@ -256,11 +262,11 @@ function test_isConnectionAllowed_Distance() {
       Blockly.OUTPUT_VALUE, null, true);
   two.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
 
-  assertTrue(one.isConnectionAllowed(two, 20.0));
+  assertTrue(two.isConnectionAllowed(one, 20.0));
   // Move connections farther apart.
   two.x_ = 100;
   two.y_ = 100;
-  assertFalse(one.isConnectionAllowed(two, 20.0));
+  assertFalse(two.isConnectionAllowed(one, 20.0));
 }
 
 function test_isConnectionAllowed_Unrendered() {
@@ -270,12 +276,14 @@ function test_isConnectionAllowed_Unrendered() {
       Blockly.INPUT_VALUE);
   one.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
 
-  // Don't offer to connect an already connected left (male) value plug to
+  // Don't offer to connect a left (male) value plug to
   // an available right (female) value plug.
+  // Unlike in Blockly, you can't do this even if the left value plug isn't
+  // already connected.
   var two = helper_createConnection(0, 0, Blockly.OUTPUT_VALUE);
   two.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
 
-  assertTrue(one.isConnectionAllowed(two));
+  assertFalse(one.isConnectionAllowed(two));
   var three = helper_createConnection(0, 0, Blockly.INPUT_VALUE);
   three.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
 
@@ -295,6 +303,7 @@ function test_isConnectionAllowed_NoNext() {
 
   var two = helper_createConnection(0, 0, Blockly.PREVIOUS_STATEMENT);
   two.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
+  two.sourceBlock_.previousConnection = two;
 
   assertTrue(two.isConnectionAllowed(one));
 
@@ -303,7 +312,8 @@ function test_isConnectionAllowed_NoNext() {
   three.sourceBlock_.previousConnection = three;
   Blockly.Connection.connectReciprocally_(one, three);
 
-  assertFalse(two.isConnectionAllowed(one));
+  // A terminal block is allowed to replace another terminal block.
+  assertTrue(two.isConnectionAllowed(one));
 }
 
 function test_isConnectionAllowed_InsertionMarker() {
@@ -332,4 +342,63 @@ function testCheckConnection_Okay() {
   output.checkConnection_(input);
 
   connectionTest_tearDown();
+}
+
+function test_canConnectWithReason_Procedures_WrongBlockType() {
+  var sharedWorkspace = {};
+  var one = helper_createConnection(0, 0, Blockly.NEXT_STATEMENT);
+  one.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
+  one.sourceBlock_.type = Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE;
+  // Make one be the connection on its source block's input.
+  one.sourceBlock_.getInput = function() {
+    return {
+      connection: one
+    };
+  };
+
+  var two = helper_createConnection(0, 0, Blockly.PREVIOUS_STATEMENT);
+  two.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
+  // Fail because two's source block is the wrong type.
+  two.sourceBlock_.type = 'wrong_type';
+  assertEquals(Blockly.Connection.REASON_CUSTOM_PROCEDURE,
+      one.canConnectWithReason_(two));
+}
+
+function test_canConnectWithReason_Procedures_Pass() {
+  var sharedWorkspace = {};
+  var one = helper_createConnection(0, 0, Blockly.NEXT_STATEMENT);
+  one.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
+  one.sourceBlock_.type = Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE;
+  // Make one be the connection on its source block's input.
+  one.sourceBlock_.getInput = function() {
+    return {
+      connection: one
+    };
+  };
+  var two = helper_createConnection(0, 0, Blockly.PREVIOUS_STATEMENT);
+  two.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
+  two.sourceBlock_.type = Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE;
+  assertEquals(Blockly.Connection.CAN_CONNECT,
+      one.canConnectWithReason_(two));
+}
+
+function test_canConnectWithReason_Procedures_NextConnection() {
+  var sharedWorkspace = {};
+  var one = helper_createConnection(0, 0, Blockly.NEXT_STATEMENT);
+  one.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
+  one.sourceBlock_.type = Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE;
+  // One is the next connection, not an input connection
+  one.sourceBlock_.nextConnection = one;
+  one.sourceBlock_.getInput = function() {
+    return {
+      connection: null
+    };
+  };
+  var two = helper_createConnection(0, 0, Blockly.PREVIOUS_STATEMENT);
+  two.sourceBlock_ = helper_makeSourceBlock(sharedWorkspace);
+  // It should be okay, even if two's source block has the wrong type, because
+  // it's not trying to connect to the input.
+  two.sourceBlock_.type = 'wrong_type';
+  assertEquals(Blockly.Connection.CAN_CONNECT,
+      one.canConnectWithReason_(two));
 }

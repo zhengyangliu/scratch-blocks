@@ -26,8 +26,6 @@
 
 goog.provide('Blockly.Input');
 
-// TODO(scr): Fix circular dependencies
-// goog.require('Blockly.Block');
 goog.require('Blockly.Connection');
 goog.require('Blockly.FieldLabel');
 goog.require('goog.asserts');
@@ -43,6 +41,9 @@ goog.require('goog.asserts');
  * @constructor
  */
 Blockly.Input = function(type, name, block, connection) {
+  if (type != Blockly.DUMMY_INPUT && !name) {
+    throw 'Value inputs and statement inputs must have non-empty name.';
+  }
   /** @type {number} */
   this.type = type;
   /** @type {string} */
@@ -56,6 +57,13 @@ Blockly.Input = function(type, name, block, connection) {
   this.connection = connection;
   /** @type {!Array.<!Blockly.Field>} */
   this.fieldRow = [];
+
+  /**
+   * The shape that is displayed when this input is rendered but not filled.
+   * @type {SVGElement}
+   * @package
+   */
+  this.outlinePath = null;
 };
 
 /**
@@ -72,13 +80,32 @@ Blockly.Input.prototype.align = Blockly.ALIGN_LEFT;
 Blockly.Input.prototype.visible_ = true;
 
 /**
- * Add an item to the end of the input's field row.
+ * Add a field (or label from string), and all prefix and suffix fields, to the
+ * end of the input's field row.
  * @param {string|!Blockly.Field} field Something to add as a field.
  * @param {string=} opt_name Language-neutral identifier which may used to find
  *     this field again.  Should be unique to the host block.
  * @return {!Blockly.Input} The input being append to (to allow chaining).
  */
 Blockly.Input.prototype.appendField = function(field, opt_name) {
+  this.insertFieldAt(this.fieldRow.length, field, opt_name);
+  return this;
+};
+
+/**
+ * Inserts a field (or label from string), and all prefix and suffix fields, at
+ * the location of the input's field row.
+ * @param {number} index The index at which to insert field.
+ * @param {string|!Blockly.Field} field Something to add as a field.
+ * @param {string=} opt_name Language-neutral identifier which may used to find
+ *     this field again.  Should be unique to the host block.
+ * @return {number} The index following the last inserted field.
+ */
+Blockly.Input.prototype.insertFieldAt = function(index, field, opt_name) {
+  if (index < 0 || index > this.fieldRow.length) {
+    throw new Error('index ' + index + ' out of bounds.');
+  }
+
   // Empty string, Null or undefined generates no field, unless field is named.
   if (!field && !opt_name) {
     return this;
@@ -95,13 +122,14 @@ Blockly.Input.prototype.appendField = function(field, opt_name) {
 
   if (field.prefixField) {
     // Add any prefix.
-    this.appendField(field.prefixField);
+    index = this.insertFieldAt(index, field.prefixField);
   }
   // Add the field to the field row.
-  this.fieldRow.push(field);
+  this.fieldRow.splice(index, 0, field);
+  ++index;
   if (field.suffixField) {
     // Add any suffix.
-    this.appendField(field.suffixField);
+    index = this.insertFieldAt(index, field.suffixField);
   }
 
   if (this.sourceBlock_.rendered) {
@@ -109,7 +137,7 @@ Blockly.Input.prototype.appendField = function(field, opt_name) {
     // Adding a field will cause the block to change shape.
     this.sourceBlock_.bumpNeighbours_();
   }
-  return this;
+  return index;
 };
 
 /**
@@ -211,8 +239,8 @@ Blockly.Input.prototype.init = function() {
   if (!this.sourceBlock_.workspace.rendered) {
     return;  // Headless blocks don't need fields initialized.
   }
-  for (var x = 0; x < this.fieldRow.length; x++) {
-    this.fieldRow[x].init(this.sourceBlock_);
+  for (var i = 0; i < this.fieldRow.length; i++) {
+    this.fieldRow[i].init(this.sourceBlock_);
   }
 };
 
@@ -220,6 +248,9 @@ Blockly.Input.prototype.init = function() {
  * Sever all links to this input.
  */
 Blockly.Input.prototype.dispose = function() {
+  if (this.outlinePath) {
+    goog.dom.removeNode(this.outlinePath);
+  }
   for (var i = 0, field; field = this.fieldRow[i]; i++) {
     field.dispose();
   }
@@ -227,4 +258,28 @@ Blockly.Input.prototype.dispose = function() {
     this.connection.dispose();
   }
   this.sourceBlock_ = null;
+};
+
+/**
+ * Create the input shape path element and attach it to the given SVG element.
+ * @param {!SVGElement} svgRoot The parent on which ot append the new element.
+ * @package
+ */
+Blockly.Input.prototype.initOutlinePath = function(svgRoot) {
+  if (!this.sourceBlock_.workspace.rendered) {
+    return;  // Headless blocks don't need field outlines.
+  }
+  if (this.outlinePath) {
+    return;
+  }
+  if (this.type == Blockly.INPUT_VALUE) {
+    this.outlinePath = Blockly.utils.createSvgElement(
+        'path',
+        {
+          'class': 'blocklyPath',
+          'style': 'visibility: hidden', // Hide by default - shown when not connected.
+          'd': ''  // IE doesn't like paths without the data definition, set an empty default
+        },
+        svgRoot);
+  }
 };

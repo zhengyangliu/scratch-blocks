@@ -26,9 +26,9 @@
 
 goog.provide('Blockly.Bubble');
 
+goog.require('Blockly.Touch');
 goog.require('Blockly.Workspace');
 goog.require('goog.dom');
-goog.require('goog.math');
 goog.require('goog.math.Coordinate');
 goog.require('goog.userAgent');
 
@@ -39,14 +39,14 @@ goog.require('goog.userAgent');
  *     bubble.
  * @param {!Element} content SVG content for the bubble.
  * @param {Element} shape SVG element to avoid eclipsing.
- * @param {!goog.math.Coodinate} anchorXY Absolute position of bubble's anchor
+ * @param {!goog.math.Coordinate} anchorXY Absolute position of bubble's anchor
  *     point.
  * @param {?number} bubbleWidth Width of bubble, or null if not resizable.
  * @param {?number} bubbleHeight Height of bubble, or null if not resizable.
  * @constructor
  */
 Blockly.Bubble = function(workspace, content, shape, anchorXY,
-                          bubbleWidth, bubbleHeight) {
+    bubbleWidth, bubbleHeight) {
   this.workspace_ = workspace;
   this.content_ = content;
   this.shape_ = shape;
@@ -55,7 +55,7 @@ Blockly.Bubble = function(workspace, content, shape, anchorXY,
   if (this.workspace_.RTL) {
     angle = -angle;
   }
-  this.arrow_radians_ = goog.math.toRadians(angle);
+  this.arrow_radians_ = Blockly.utils.toRadians(angle);
 
   var canvas = workspace.getBubbleCanvas();
   canvas.appendChild(this.createDom_(content, !!(bubbleWidth && bubbleHeight)));
@@ -74,11 +74,11 @@ Blockly.Bubble = function(workspace, content, shape, anchorXY,
   this.rendered_ = true;
 
   if (!workspace.options.readOnly) {
-    Blockly.bindEvent_(this.bubbleBack_, 'mousedown', this,
-                       this.bubbleMouseDown_);
+    Blockly.bindEventWithChecks_(
+        this.bubbleBack_, 'mousedown', this, this.bubbleMouseDown_);
     if (this.resizeGroup_) {
-      Blockly.bindEvent_(this.resizeGroup_, 'mousedown', this,
-                         this.resizeMouseDown_);
+      Blockly.bindEventWithChecks_(
+          this.resizeGroup_, 'mousedown', this, this.resizeMouseDown_);
     }
   }
 };
@@ -92,7 +92,7 @@ Blockly.Bubble.BORDER_WIDTH = 6;
  * Determines the thickness of the base of the arrow in relation to the size
  * of the bubble.  Higher numbers result in thinner arrows.
  */
-Blockly.Bubble.ARROW_THICKNESS = 10;
+Blockly.Bubble.ARROW_THICKNESS = 5;
 
 /**
  * The number of degrees that the arrow bends counter-clockwise.
@@ -144,6 +144,16 @@ Blockly.Bubble.unbindDragEvents_ = function() {
   }
 };
 
+/*
+ * Handle a mouse-up event while dragging a bubble's border or resize handle.
+ * @param {!Event} e Mouse up event.
+ * @private
+ */
+Blockly.Bubble.bubbleMouseUp_ = function(/*e*/) {
+  Blockly.Touch.clearTouchIdentifier();
+  Blockly.Bubble.unbindDragEvents_();
+};
+
 /**
  * Flag to stop incremental rendering during construction.
  * @private
@@ -151,14 +161,15 @@ Blockly.Bubble.unbindDragEvents_ = function() {
 Blockly.Bubble.prototype.rendered_ = false;
 
 /**
- * Absolute coordinate of anchor point.
+ * Absolute coordinate of anchor point, in workspace coordinates.
  * @type {goog.math.Coordinate}
  * @private
  */
 Blockly.Bubble.prototype.anchorXY_ = null;
 
 /**
- * Relative X coordinate of bubble with respect to the anchor's centre.
+ * Relative X coordinate of bubble with respect to the anchor's centre,
+ * in workspace units.
  * In RTL mode the initial value is negated.
  * @private
  */
@@ -210,7 +221,7 @@ Blockly.Bubble.prototype.createDom_ = function(content, hasResize) {
     [...content goes here...]
   </g>
   */
-  this.bubbleGroup_ = Blockly.createSvgElement('g', {}, null);
+  this.bubbleGroup_ = Blockly.utils.createSvgElement('g', {}, null);
   var filter =
       {'filter': 'url(#' + this.workspace_.options.embossFilterId + ')'};
   if (goog.userAgent.getUserAgentString().indexOf('JavaFX') != -1) {
@@ -220,30 +231,41 @@ Blockly.Bubble.prototype.createDom_ = function(content, hasResize) {
     // https://github.com/google/blockly/issues/99
     filter = {};
   }
-  var bubbleEmboss = Blockly.createSvgElement('g',
+  var bubbleEmboss = Blockly.utils.createSvgElement('g',
       filter, this.bubbleGroup_);
-  this.bubbleArrow_ = Blockly.createSvgElement('path', {}, bubbleEmboss);
-  this.bubbleBack_ = Blockly.createSvgElement('rect',
-      {'class': 'blocklyDraggable', 'x': 0, 'y': 0,
-      'rx': Blockly.Bubble.BORDER_WIDTH, 'ry': Blockly.Bubble.BORDER_WIDTH},
+  this.bubbleArrow_ = Blockly.utils.createSvgElement('path', {}, bubbleEmboss);
+  this.bubbleBack_ = Blockly.utils.createSvgElement('rect',
+      {
+        'class': 'blocklyDraggable',
+        'x': 0,
+        'y': 0,
+        'rx': Blockly.Bubble.BORDER_WIDTH,
+        'ry': Blockly.Bubble.BORDER_WIDTH
+      },
       bubbleEmboss);
   if (hasResize) {
-    this.resizeGroup_ = Blockly.createSvgElement('g',
+    this.resizeGroup_ = Blockly.utils.createSvgElement('g',
         {'class': this.workspace_.RTL ?
                   'blocklyResizeSW' : 'blocklyResizeSE'},
         this.bubbleGroup_);
     var resizeSize = 2 * Blockly.Bubble.BORDER_WIDTH;
-    Blockly.createSvgElement('polygon',
+    Blockly.utils.createSvgElement('polygon',
         {'points': '0,x x,x x,0'.replace(/x/g, resizeSize.toString())},
         this.resizeGroup_);
-    Blockly.createSvgElement('line',
-        {'class': 'blocklyResizeLine',
-        'x1': resizeSize / 3, 'y1': resizeSize - 1,
-        'x2': resizeSize - 1, 'y2': resizeSize / 3}, this.resizeGroup_);
-    Blockly.createSvgElement('line',
-        {'class': 'blocklyResizeLine',
-        'x1': resizeSize * 2 / 3, 'y1': resizeSize - 1,
-        'x2': resizeSize - 1, 'y2': resizeSize * 2 / 3}, this.resizeGroup_);
+    Blockly.utils.createSvgElement('line',
+        {
+          'class': 'blocklyResizeLine',
+          'x1': resizeSize / 3, 'y1': resizeSize - 1,
+          'x2': resizeSize - 1, 'y2': resizeSize / 3
+        }, this.resizeGroup_);
+    Blockly.utils.createSvgElement('line',
+        {
+          'class': 'blocklyResizeLine',
+          'x1': resizeSize * 2 / 3,
+          'y1': resizeSize - 1,
+          'x2': resizeSize - 1,
+          'y2': resizeSize * 2 / 3
+        }, this.resizeGroup_);
   } else {
     this.resizeGroup_ = null;
   }
@@ -252,49 +274,52 @@ Blockly.Bubble.prototype.createDom_ = function(content, hasResize) {
 };
 
 /**
+ * Return the root node of the bubble's SVG group.
+ * @return {Element} The root SVG node of the bubble's group.
+ */
+Blockly.Bubble.prototype.getSvgRoot = function() {
+  return this.bubbleGroup_;
+};
+
+/**
+ * Expose the block's ID on the bubble's top-level SVG group.
+ * @param {string} id ID of block.
+ */
+Blockly.Bubble.prototype.setSvgId = function(id) {
+  if (this.bubbleGroup_.dataset) {
+    this.bubbleGroup_.dataset.blockId = id;
+  }
+};
+
+/**
  * Handle a mouse-down on bubble's border.
  * @param {!Event} e Mouse down event.
  * @private
  */
 Blockly.Bubble.prototype.bubbleMouseDown_ = function(e) {
-  this.promote_();
-  Blockly.Bubble.unbindDragEvents_();
-  if (Blockly.isRightButton(e)) {
-    // No right-click.
-    e.stopPropagation();
-    return;
-  } else if (Blockly.isTargetInput_(e)) {
-    // When focused on an HTML text input widget, don't trap any events.
-    return;
+  var gesture = this.workspace_.getGesture(e);
+  if (gesture) {
+    gesture.handleBubbleStart(e, this);
   }
-  // Left-click (or middle click)
-  Blockly.Css.setCursor(Blockly.Css.Cursor.CLOSED);
-
-  this.workspace_.startDrag(e, new goog.math.Coordinate(
-      this.workspace_.RTL ? -this.relativeLeft_ : this.relativeLeft_,
-      this.relativeTop_));
-
-  Blockly.Bubble.onMouseUpWrapper_ = Blockly.bindEvent_(document,
-      'mouseup', this, Blockly.Bubble.unbindDragEvents_);
-  Blockly.Bubble.onMouseMoveWrapper_ = Blockly.bindEvent_(document,
-      'mousemove', this, this.bubbleMouseMove_);
-  Blockly.hideChaff();
-  // This event has been handled.  No need to bubble up to the document.
-  e.stopPropagation();
 };
 
 /**
- * Drag this bubble to follow the mouse.
- * @param {!Event} e Mouse move event.
+ * Show the context menu for this bubble.
+ * @param {!Event} _e Mouse event.
  * @private
  */
-Blockly.Bubble.prototype.bubbleMouseMove_ = function(e) {
-  this.autoLayout_ = false;
-  var newXY = this.workspace_.moveDrag(e);
-  this.relativeLeft_ = this.workspace_.RTL ? -newXY.x : newXY.x;
-  this.relativeTop_ = newXY.y;
-  this.positionBubble_();
-  this.renderArrow_();
+Blockly.Bubble.prototype.showContextMenu_ = function(_e) {
+  // NOP on bubbles, but used by the bubble dragger to pass events to
+  // workspace comments.
+};
+
+/**
+ * Get whether this bubble is deletable or not.
+ * @return {boolean} True if deletable.
+ * @package
+ */
+Blockly.Bubble.prototype.isDeletable = function() {
+  return false;
 };
 
 /**
@@ -305,20 +330,18 @@ Blockly.Bubble.prototype.bubbleMouseMove_ = function(e) {
 Blockly.Bubble.prototype.resizeMouseDown_ = function(e) {
   this.promote_();
   Blockly.Bubble.unbindDragEvents_();
-  if (Blockly.isRightButton(e)) {
+  if (Blockly.utils.isRightButton(e)) {
     // No right-click.
     e.stopPropagation();
     return;
   }
   // Left-click (or middle click)
-  Blockly.Css.setCursor(Blockly.Css.Cursor.CLOSED);
-
   this.workspace_.startDrag(e, new goog.math.Coordinate(
       this.workspace_.RTL ? -this.width_ : this.width_, this.height_));
 
-  Blockly.Bubble.onMouseUpWrapper_ = Blockly.bindEvent_(document,
-      'mouseup', this, Blockly.Bubble.unbindDragEvents_);
-  Blockly.Bubble.onMouseMoveWrapper_ = Blockly.bindEvent_(document,
+  Blockly.Bubble.onMouseUpWrapper_ = Blockly.bindEventWithChecks_(document,
+      'mouseup', this, Blockly.Bubble.bubbleMouseUp_);
+  Blockly.Bubble.onMouseMoveWrapper_ = Blockly.bindEventWithChecks_(document,
       'mousemove', this, this.resizeMouseMove_);
   Blockly.hideChaff();
   // This event has been handled.  No need to bubble up to the document.
@@ -350,11 +373,16 @@ Blockly.Bubble.prototype.registerResizeEvent = function(callback) {
 
 /**
  * Move this bubble to the top of the stack.
+ * @return {!boolean} Whether or not the bubble has been moved.
  * @private
  */
 Blockly.Bubble.prototype.promote_ = function() {
   var svgGroup = this.bubbleGroup_.parentNode;
-  svgGroup.appendChild(this.bubbleGroup_);
+  if (svgGroup.lastChild !== this.bubbleGroup_) {
+    svgGroup.appendChild(this.bubbleGroup_);
+    return true;
+  }
+  return false;
 };
 
 /**
@@ -422,13 +450,22 @@ Blockly.Bubble.prototype.layoutBubble_ = function() {
 Blockly.Bubble.prototype.positionBubble_ = function() {
   var left = this.anchorXY_.x;
   if (this.workspace_.RTL) {
-    left -= this.relativeLeft_ + this.width_;
+    left -= this.relativeLeft_ ;
   } else {
     left += this.relativeLeft_;
   }
   var top = this.relativeTop_ + this.anchorXY_.y;
-  this.bubbleGroup_.setAttribute('transform',
-      'translate(' + left + ',' + top + ')');
+  this.moveTo(left, top);
+};
+
+/**
+ * Move the bubble group to the specified location in workspace coordinates.
+ * @param {number} x The x position to move to.
+ * @param {number} y The y position to move to.
+ * @package
+ */
+Blockly.Bubble.prototype.moveTo = function(x, y) {
+  this.bubbleGroup_.setAttribute('transform', 'translate(' + x + ',' + y + ')');
 };
 
 /**
@@ -518,7 +555,7 @@ Blockly.Bubble.prototype.renderArrow_ = function() {
     var bubbleSize = this.getBubbleSize();
     var thickness = (bubbleSize.width + bubbleSize.height) /
                     Blockly.Bubble.ARROW_THICKNESS;
-    thickness = Math.min(thickness, bubbleSize.width, bubbleSize.height) / 2;
+    thickness = Math.min(thickness, bubbleSize.width, bubbleSize.height) / 4;
 
     // Back the tip of the arrow off of the anchor.
     var backoffRatio = 1 - Blockly.Bubble.ANCHOR_RADIUS / hypotenuse;
@@ -576,4 +613,52 @@ Blockly.Bubble.prototype.dispose = function() {
   this.workspace_ = null;
   this.content_ = null;
   this.shape_ = null;
+};
+
+/**
+ * Move this bubble during a drag, taking into account whether or not there is
+ * a drag surface.
+ * @param {?Blockly.BlockDragSurfaceSvg} dragSurface The surface that carries
+ *     rendered items during a drag, or null if no drag surface is in use.
+ * @param {!goog.math.Coordinate} newLoc The location to translate to, in
+ *     workspace coordinates.
+ * @package
+ */
+Blockly.Bubble.prototype.moveDuringDrag = function(dragSurface, newLoc) {
+  if (dragSurface) {
+    dragSurface.translateSurface(newLoc.x, newLoc.y);
+  } else {
+    this.moveTo(newLoc.x, newLoc.y);
+  }
+  if (this.workspace_.RTL) {
+    this.relativeLeft_ = this.anchorXY_.x - newLoc.x - this.width_;
+  } else {
+    this.relativeLeft_ = newLoc.x - this.anchorXY_.x;
+  }
+  this.relativeTop_ = newLoc.y - this.anchorXY_.y;
+  this.renderArrow_();
+};
+
+/**
+ * Return the coordinates of the top corner of this bubble's starting edge (e.g.
+ * top left corner in LTR and top right corner in RTL) relative
+ * to the drawing surface's origin (0,0), in workspace units.
+ * @return {!goog.math.Coordinate} Object with .x and .y properties.
+ */
+Blockly.Bubble.prototype.getRelativeToSurfaceXY = function() {
+  return new goog.math.Coordinate(
+      this.workspace_.RTL ? this.anchorXY_.x - this.relativeLeft_ : this.anchorXY_.x + this.relativeLeft_,
+      this.anchorXY_.y + this.relativeTop_);
+};
+
+/**
+ * Set whether auto-layout of this bubble is enabled.  The first time a bubble
+ * is shown it positions itself to not cover any blocks.  Once a user has
+ * dragged it to reposition, it renders where the user put it.
+ * @param {boolean} enable True if auto-layout should be enabled, false
+ *     otherwise.
+ * @package
+ */
+Blockly.Bubble.prototype.setAutoLayout = function(enable) {
+  this.autoLayout_ = enable;
 };

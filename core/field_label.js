@@ -30,6 +30,7 @@ goog.require('Blockly.Field');
 goog.require('Blockly.Tooltip');
 goog.require('goog.dom');
 goog.require('goog.math.Size');
+goog.require('goog.userAgent');
 
 
 /**
@@ -40,16 +41,39 @@ goog.require('goog.math.Size');
  * @constructor
  */
 Blockly.FieldLabel = function(text, opt_class) {
-  this.size_ = new goog.math.Size(0, 17.5);
+  this.size_ = new goog.math.Size(0, 0);
   this.class_ = opt_class;
   this.setValue(text);
 };
 goog.inherits(Blockly.FieldLabel, Blockly.Field);
 
 /**
- * Editable fields are saved by the XML renderer, non-editable fields are not.
+ * Construct a FieldLabel from a JSON arg object,
+ * dereferencing any string table references.
+ * @param {!Object} options A JSON object with options (text, and class).
+ * @returns {!Blockly.FieldLabel} The new field instance.
+ * @package
+ * @nocollapse
+ */
+Blockly.FieldLabel.fromJson = function(options) {
+  var text = Blockly.utils.replaceMessageReferences(options['text']);
+  return new Blockly.FieldLabel(text, options['class']);
+};
+
+/**
+ * Editable fields usually show some sort of UI for the user to change them.
+ * @type {boolean}
+ * @public
  */
 Blockly.FieldLabel.prototype.EDITABLE = false;
+
+/**
+ * Serializable fields are saved by the XML renderer, non-serializable fields
+ * are not.  Editable fields should be serialized.
+ * @type {boolean}
+ * @public
+ */
+Blockly.FieldLabel.prototype.SERIALIZABLE = false;
 
 /**
  * Install this text on a block.
@@ -60,10 +84,16 @@ Blockly.FieldLabel.prototype.init = function() {
     return;
   }
   // Build the DOM.
-  this.textElement_ = Blockly.createSvgElement('text',
-      {'class': 'blocklyText', 'y': this.size_.height - 5}, null);
+  this.textElement_ = Blockly.utils.createSvgElement('text',
+      {
+        'class': 'blocklyText',
+        'y': Blockly.BlockSvg.FIELD_TOP_PADDING,
+        'text-anchor': 'middle',
+        'dominant-baseline': 'middle',
+        'dy': goog.userAgent.EDGE_OR_IE ? Blockly.Field.IE_TEXT_OFFSET : '0'
+      }, null);
   if (this.class_) {
-    Blockly.addClass_(this.textElement_, this.class_);
+    Blockly.utils.addClass(this.textElement_, this.class_);
   }
   if (!this.visible_) {
     this.textElement_.style.display = 'none';
@@ -74,7 +104,7 @@ Blockly.FieldLabel.prototype.init = function() {
   this.textElement_.tooltip = this.sourceBlock_;
   Blockly.Tooltip.bindMouseEvents(this.textElement_);
   // Force a render.
-  this.updateTextNode_();
+  this.render_();
 };
 
 /**
@@ -102,3 +132,5 @@ Blockly.FieldLabel.prototype.getSvgRoot = function() {
 Blockly.FieldLabel.prototype.setTooltip = function(newTip) {
   this.textElement_.tooltip = newTip;
 };
+
+Blockly.Field.register('field_label', Blockly.FieldLabel);
